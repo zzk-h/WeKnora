@@ -64,6 +64,8 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lkeap v1.3.103
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 	github.com/tiktoken-go/tokenizer v0.7.0
+	github.com/tree-sitter/go-tree-sitter v0.25.0
+	github.com/tree-sitter/tree-sitter-go v0.25.0
 	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.4
 	github.com/volcengine/vikingdb-go-sdk v0.0.11
 	github.com/wailsapp/wails/v2 v2.12.0
@@ -90,6 +92,8 @@ require (
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+require github.com/mattn/go-pointer v0.0.1 // indirect
 
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
@@ -327,7 +331,7 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
