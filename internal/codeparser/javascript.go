@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 	tree_sitter_javascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
@@ -26,10 +27,18 @@ func NewJSParser() Parser {
 	}
 }
 
-// NewTSParser returns a Parser for TypeScript source files (.ts / .tsx).
+// NewTSParser returns a Parser for TypeScript source files (.ts / .tsx). It
+// uses the TSX grammar, which accepts both plain TypeScript and JSX.
 func NewTSParser() Parser {
+	return newTSParser(tree_sitter_typescript.LanguageTSX())
+}
+
+// newTSParser builds a TypeScript parser on a specific grammar: the plain TS
+// grammar for .ts (so angle-bracket type assertions are not misread as JSX)
+// or the TSX grammar for .tsx.
+func newTSParser(lang unsafe.Pointer) Parser {
 	return &jsParser{
-		lang:     tree_sitter.NewLanguage(tree_sitter_typescript.LanguageTSX()),
+		lang:     tree_sitter.NewLanguage(lang),
 		language: LanguageTypeScript,
 	}
 }
@@ -41,8 +50,10 @@ func NewJSTSParserForPath(path string) (Parser, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".js", ".jsx", ".mjs", ".cjs":
 		return NewJSParser(), nil
-	case ".ts", ".tsx":
-		return NewTSParser(), nil
+	case ".ts":
+		return newTSParser(tree_sitter_typescript.LanguageTypescript()), nil
+	case ".tsx":
+		return newTSParser(tree_sitter_typescript.LanguageTSX()), nil
 	default:
 		return nil, fmt.Errorf("codeparser: %s: unsupported JS/TS extension", path)
 	}
@@ -202,39 +213,10 @@ func (e *jsExtractor) extractImport(n *tree_sitter.Node) {
 	})
 	e.addRelation(e.moduleID, impID, RelationImports)
 
-	// Imported bindings resolve by name for CALLS, like package-level
-	// functions.
-	if clause := findChildByKind(n, "import_clause"); clause != nil {
-		e.extractImportBindings(clause)
-	}
-}
-
-// extractImportBindings indexes the local names an import binds: the default
-// import, namespace import, and each named specifier.
-func (e *jsExtractor) extractImportBindings(clause *tree_sitter.Node) {
-	cursor := clause.Walk()
-	defer cursor.Close()
-	for _, child := range clause.NamedChildren(cursor) {
-		switch child.Kind() {
-		case "identifier": // default import
-			e.funcs[e.text(&child)] = e.moduleID + "." + e.text(&child)
-		case "namespace_import":
-			if id := findChildByKind(&child, "identifier"); id != nil {
-				e.funcs[e.text(id)] = e.moduleID + "." + e.text(id)
-			}
-		case "named_imports":
-			for _, spec := range findDescendantsByKind(&child, "import_specifier") {
-				local := spec.ChildByFieldName("alias")
-				if local == nil {
-					local = spec.ChildByFieldName("name")
-				}
-				if local != nil {
-					name := e.text(local)
-					e.funcs[name] = e.moduleID + "." + name
-				}
-			}
-		}
-	}
+	// Imported bindings are deliberately NOT indexed into e.funcs: an imported
+	// name has no emitted symbol in this file, so a CALLS edge to it would
+	// dangle (its To endpoint unresolvable by the downstream graph store).
+	// This matches the Go parser, which only emits the Import symbol.
 }
 
 func (e *jsExtractor) extractFunction(n *tree_sitter.Node) {

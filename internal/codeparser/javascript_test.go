@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+// assertRelationEndpointsResolve is a graph-integrity regression check: every
+// relation endpoint (From and To) must resolve to an emitted symbol, so the
+// downstream graph store never sees a dangling reference.
+func assertRelationEndpointsResolve(t *testing.T, fr *FileResult) {
+	t.Helper()
+	syms := symbolsByID(fr.Symbols)
+	for _, r := range fr.Relations {
+		if _, ok := syms[r.From]; !ok {
+			t.Errorf("relation %s %s %s: From endpoint %q has no emitted symbol",
+				r.From, r.Type, r.To, r.From)
+		}
+		if _, ok := syms[r.To]; !ok {
+			t.Errorf("relation %s %s %s: To endpoint %q has no emitted symbol",
+				r.From, r.Type, r.To, r.To)
+		}
+	}
+}
+
 func TestJSParserLanguage(t *testing.T) {
 	p := NewJSParser()
 	if p.Language() != LanguageJavaScript {
@@ -173,9 +191,10 @@ function main() {
 		t.Errorf("missing INHERITS relation Dog->Animal, relations: %v", keys2(rels))
 	}
 
-	// CALLS: greet->helper, Dog.speak->greet, arrow(var)->greet.
+	// CALLS: Dog.speak->greet, arrow(var)->greet. The imported `helper` is
+	// NOT a CALLS target: it has no emitted symbol in this file, so such an
+	// edge would dangle (see the graph-integrity check below).
 	for _, want := range [][2]string{
-		{"demo.js:module.greet", "demo.js:module.helper"},
 		{"demo.js:module.Dog.speak", "demo.js:module.greet"},
 		{"demo.js:module.arrow", "demo.js:module.greet"},
 	} {
@@ -184,11 +203,17 @@ function main() {
 			t.Errorf("missing relation %s", key)
 		}
 	}
+	if rels["demo.js:module.greet|CALLS|demo.js:module.helper"] {
+		t.Error("unexpected dangling CALLS greet->helper: imported names have no symbol")
+	}
 
 	// REFERENCES: Dog.speak references defaultName variable.
 	if !rels["demo.js:module.Dog.speak|REFERENCES|demo.js:module.defaultName"] {
 		t.Errorf("missing REFERENCES relation Dog.speak->defaultName")
 	}
+
+	// Graph integrity: every relation endpoint resolves to an emitted symbol.
+	assertRelationEndpointsResolve(t, fr)
 }
 
 func TestJSParserSyntaxError(t *testing.T) {
@@ -340,15 +365,19 @@ function main(): void {
 		}
 	}
 
-	// CALLS: Person.greet -> helper.
-	if !rels["demo.ts:module.Person.greet|CALLS|demo.ts:module.helper"] {
-		t.Errorf("missing CALLS relation Person.greet->helper")
+	// CALLS: the imported `helper` is NOT a target (no emitted symbol in this
+	// file). Person.greet has no other in-file call target.
+	if rels["demo.ts:module.Person.greet|CALLS|demo.ts:module.helper"] {
+		t.Error("unexpected dangling CALLS Person.greet->helper: imported names have no symbol")
 	}
 
 	// REFERENCES: main references defaultName variable.
 	if !rels["demo.ts:module.main|REFERENCES|demo.ts:module.defaultName"] {
 		t.Errorf("missing REFERENCES relation main->defaultName")
 	}
+
+	// Graph integrity: every relation endpoint resolves to an emitted symbol.
+	assertRelationEndpointsResolve(t, fr)
 }
 
 func TestTSParserSyntaxError(t *testing.T) {
@@ -405,5 +434,26 @@ func TestJSTSParserByExtension(t *testing.T) {
 	// Unknown extension is an error.
 	if _, err := NewJSTSParserForPath("a.py"); err == nil {
 		t.Error("NewJSTSParserForPath(a.py) should return error")
+	}
+}
+
+// TestTSParserAngleBracketAssertion verifies that a plain .ts file parses
+// angle-bracket type assertions (<T>x) as TypeScript, not as JSX. The .ts
+// route must use the plain TS grammar; only .tsx uses the TSX grammar.
+func TestTSParserAngleBracketAssertion(t *testing.T) {
+	src := []byte("const n = <number>someValue;\n")
+	p, err := NewJSTSParserForPath("assert.ts")
+	if err != nil {
+		t.Fatalf("NewJSTSParserForPath(assert.ts) error = %v", err)
+	}
+	fr, err := p.ParseFile("assert.ts", src)
+	if err != nil {
+		t.Fatalf("ParseFile(assert.ts) error = %v (angle-bracket assertion misread as JSX?)", err)
+	}
+	if fr.Error != nil {
+		t.Fatalf("FileResult.Error = %v", fr.Error)
+	}
+	if _, ok := symbolsByID(fr.Symbols)["assert.ts:module.n"]; !ok {
+		t.Errorf("missing variable symbol n, got IDs: %v", keys(symbolsByID(fr.Symbols)))
 	}
 }
